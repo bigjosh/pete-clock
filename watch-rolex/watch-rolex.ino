@@ -13,6 +13,9 @@
 // we have two choices - add leap phases with a breshinghams style "bouince around the exact value", or...
 // be lazy and just round up to 56ms per tick. I am lazy, and the arduino clock can be off by 5% anyway so who cares.
 
+// Include the digitalWriteFast library
+#include <digitalWriteFast.h>
+
 #define MILLIS_PER_SEC_PHASE 56
 #define SEC_PER_MIN 60
 #define MILLIS_PER_MIN_PHASE (MILLIS_PER_SEC_PHASE*SEC_PER_MIN)
@@ -88,10 +91,10 @@ void loop() {
     outer_phase--;
     
     for (int i = 0; i < CONTACT_COUNT; i++) {    
-      digitalWrite(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
+      digitalWriteFast(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
     }
     
-    next_sec_phase = now + MILLIS_PER_SEC_PHASE;
+    next_sec_phase += MILLIS_PER_SEC_PHASE;
     
   }
 
@@ -104,10 +107,10 @@ void loop() {
       }
 
     for (int i = 0; i < CONTACT_COUNT; i++) {    
-      digitalWrite(motorPins[INNER_AXLE][i], phases[inner_phase][i]);
+      digitalWriteFast(motorPins[INNER_AXLE][i], phases[inner_phase][i]);
     }
     
-    next_min_phase = now + MILLIS_PER_MIN_PHASE;
+    next_min_phase += MILLIS_PER_MIN_PHASE;
     
   }   
 }
