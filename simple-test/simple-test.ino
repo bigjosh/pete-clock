@@ -44,35 +44,26 @@ const int motorPins[2][CONTACT_COUNT] = {
 };
 
 
-// Variables to track where each motor is in the sequence
-int inner_phase = 0; 
-int outer_phase = 0;
-int outer_phase_substep =0;
-
 void setup() {
   // Set all motor pins as outputs
+  // Some day We might want to float pins sometimes to avoice cogging?
   for (int i = 0; i < CONTACT_COUNT; i++) {
     pinMode(motorPins[INNER_AXLE][i], OUTPUT);
     pinMode(motorPins[OUTER_AXLE][i], OUTPUT);
   }
   
+  // We dont need any interrupt so reduce jitter (although it probably doesnt matter for this test were all times are OTO 1ms)
   noInterrupts();
 }
 
-unsigned delay_us = 1000;
-
-unsigned const max_delay=1000;
-unsigned const min_delay=300;
-
-unsigned current_delay = max_delay;
-unsigned current_acceleration = -1;
+byte inner_phase = 0; 
+byte outer_phase = 0;
 
 void loop() {
   
   // 1 degree per step, 3 partial-steps per step
   
-  for( int l=0; l< 180 *3 ; l++ ) {
-  //while (1) {
+  for( unsigned l=0; l< 180 *3 ; l++ ) {
   
     // Apply the current phase to the pins
     // This should really be done with a single write to a port register
@@ -89,35 +80,21 @@ void loop() {
       inner_phase = 0;
     } 
 
-    outer_phase_substep = !outer_phase_substep;
-
-    if (1 || outer_phase_substep) {
-      
-  
-      // Outter axle forward (Counter - Clockwise)
-      outer_phase++;
-      if (outer_phase >= PHASE_COUNT) {
-        outer_phase = 0; // Loop back to start
-      }
-
-    }
     
-    if (current_delay >= max_delay) {
-      current_acceleration = -1;
-    } else if (current_delay <= min_delay) {
-      current_acceleration = 1;
+
+    // Outter axle forward (Counter - Clockwise)
+    outer_phase++;
+    if (outer_phase >= PHASE_COUNT) {
+      outer_phase = 0; // Loop back to start
     }
-  
-    current_delay += current_acceleration; 
-    
-    // for( unsigned d=0; d< current_delay; d++) {
-    //   _delay_us(1);
-    // }
     
     // longer delay = slower spin
+    // This is the emperically determined fastest velocity we can support starting from a dead stop before we start skipping steps. 
+    // This is depensand on lots of things, including the monent of inertia of the hands.
+    // Note that we can do much better than this if we implkement acceleratiuon and/or microsteps and/or increased current via doubling up pins and/or increasing Vcc. 
     _delay_us(800);
-    //delay(1); 
   }
-  
+    
+  // Pause after each half rotation 
   _delay_us(1000000);   // 1s
 }
