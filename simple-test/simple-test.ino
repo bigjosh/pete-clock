@@ -40,7 +40,6 @@ const int phases[PHASE_COUNT][CONTACT_COUNT] = {
 
 const int motorPins[2][CONTACT_COUNT] = {
   {5, 4, 7, 6},   // Inner axle  
-//  {4, 7, 6, 5},   // Inner axle
   {9, 8, 3, 2},   // Outer axle
 };
 
@@ -56,42 +55,69 @@ void setup() {
     pinMode(motorPins[INNER_AXLE][i], OUTPUT);
     pinMode(motorPins[OUTER_AXLE][i], OUTPUT);
   }
+  
+  noInterrupts();
 }
+
+unsigned delay_us = 1000;
+
+unsigned const max_delay=1000;
+unsigned const min_delay=300;
+
+unsigned current_delay = max_delay;
+unsigned current_acceleration = -1;
 
 void loop() {
   
-  // Apply the current phase to the pins
-  for (int i = 0; i < CONTACT_COUNT; i++) {    
-    digitalWrite(motorPins[INNER_AXLE][i], phases[inner_phase][i]);
-    digitalWrite(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
-  }
-
-  // Note that the two axles seem to be geared in opposite directions. 
-  // Also note that the outer axle seems to need more torque. 
-
-
-  // outer axle backward (Clockwise)
-  inner_phase++;
-  if (inner_phase >=5 ) {
-    inner_phase = 0;
-  } 
-
-  // Run the outer axel at 1/2 speed becuase (1) it needs more torque and (2) it looks cooler.
-
-  outer_phase_substep = !outer_phase_substep;
-
-  if (outer_phase_substep) {
-    
- 
-    // Outter axle forward (Counter - Clockwise)
-    outer_phase++;
-    if (outer_phase >= 5) {
-      outer_phase = 0; // Loop back to start
+  // 1 degree per step, 3 partial-steps per step
+  
+  for( int l=0; l< 180 *3 ; l++ ) {
+  //while (1) {
+  
+    // Apply the current phase to the pins
+    // This should really be done with a single write to a port register
+    for (int i = 0; i < CONTACT_COUNT; i++) {    
+      digitalWrite(motorPins[INNER_AXLE][i], phases[inner_phase][i]);
+      digitalWrite(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
     }
 
+    // Note that the two axles seem to be geared in opposite directions. 
+    
+    // outer axle backward (Clockwise)
+    inner_phase++;
+    if (inner_phase >= PHASE_COUNT ) {
+      inner_phase = 0;
+    } 
+
+    outer_phase_substep = !outer_phase_substep;
+
+    if (1 || outer_phase_substep) {
+      
+  
+      // Outter axle forward (Counter - Clockwise)
+      outer_phase++;
+      if (outer_phase >= PHASE_COUNT) {
+        outer_phase = 0; // Loop back to start
+      }
+
+    }
+    
+    if (current_delay >= max_delay) {
+      current_acceleration = -1;
+    } else if (current_delay <= min_delay) {
+      current_acceleration = 1;
+    }
+  
+    current_delay += current_acceleration; 
+    
+    // for( unsigned d=0; d< current_delay; d++) {
+    //   _delay_us(1);
+    // }
+    
+    // longer delay = slower spin
+    _delay_us(800);
+    //delay(1); 
   }
   
-
-  // longer delay = slower spin
-  delay(1); 
+  _delay_us(1000000);   // 1s
 }
