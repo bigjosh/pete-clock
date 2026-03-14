@@ -1,4 +1,8 @@
 
+// VID28-05 demo that simulates a ticking watch
+// place the outer hand at center before powering on (or press reset when seconds hand is at 12 o'clock) for minutes to tick at the right time. 
+
+
 // see "driving puls ein digital mode" in the datasheet
 // Sequncing from the VID28-05 dtatasheet using thier names
 
