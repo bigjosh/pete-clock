@@ -1,4 +1,10 @@
-// A demo of a watch face with a second hand that *smoothly* spins one rotation per minute (like a real rolex).
+// A demo of a watch face with a second hand that *smoothly* sweeps one rotation per minute (like a real rolex).
+// The minute hand also sweeps smoothly, but less dramitically. 
+// This version is nieve and uses only full phases (1/3 of a step). With my hands, it is very smooth when the hand is 
+// going up on the left side of the face, but jerky when it goes down the right side. I think this is becuase with each 
+// phase the hand is accelerated and decelerated and so when going down it picks up speed and then "bounces" when it stops at the 
+// end of the phase. I think we can cure this jerk by using microsteps to achieve constant velocity (hopefuly zero accelerateion and jerk).
+// That will be the next test!
 
 // 360 steps per rev * 3 phases per step = (360*3) phases per rev
 // (360*3) phases per rev / 60 seconds per rev = 18 phases per second
@@ -62,14 +68,10 @@ void setup() {
     pinMode(motorPins[INNER_AXLE][i], OUTPUT);
     pinMode(motorPins[OUTER_AXLE][i], OUTPUT);
   }
-  
-  unsigned long now = millis(); 
-  next_sec_phase  = now + MILLIS_PER_SEC_PHASE;
-  next_min_phase = now + MILLIS_PER_MIN_PHASE;
-  
+    
 }
 
-byte inner_phase = 0; 
+byte inner_phase = 0;     
 byte outer_phase = 0;
 
 void loop() {
@@ -85,7 +87,6 @@ void loop() {
     }    
     outer_phase--;
     
-
     for (int i = 0; i < CONTACT_COUNT; i++) {    
       digitalWrite(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
     }
@@ -94,7 +95,7 @@ void loop() {
     
   }
 
-  if ( now >= next_sec_phase ) {
+  if ( now >= next_min_phase ) {
   
       // minute hand on inner axle (Clockwise)
       inner_phase++;

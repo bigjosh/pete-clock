@@ -19,3 +19,12 @@ The outer hand ticks (it really ticks too!) each second and the inner hand ticks
 
 If you want the minute tick to come exactly as the seconds hand passed 12 o'clock, then wait for the next time the seconds is at the top and push the Arduino reset button exactly then. 
 
+## watch-rolex
+
+A slight elaboration on the watch-tick where the second hand *smoothly* sweeps one rotation per minute (like a real rolex).
+The minute hand also sweeps smoothly, but less dramatically. 
+
+This version is naïve and uses only full phases (1/3 of a step). With my hands, it is very smooth when the hand is 
+going up on the left side of the face, but jerky when it goes down the right side. I think this is because with each 
+phase the hand is accelerated and decelerated and so when going down it picks up speed and then "bounces" when it stops at the 
+end of the phase. I think we can cure this jerk by using microsteps to achieve constant velocity (hopefully zero acceleration and jerk).
