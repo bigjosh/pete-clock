@@ -28,3 +28,12 @@ This version is naïve and uses only full phases (1/3 of a step). With my hands,
 going up on the left side of the face, but jerky when it goes down the right side. I think this is because with each 
 phase the hand is accelerated and decelerated and so when going down it picks up speed and then "bounces" when it stops at the 
 end of the phase. I think we can cure this jerk by using microsteps to achieve constant velocity (hopefully zero acceleration and jerk).
+
+## watch-rolex-microphase
+
+A complete rewrite of watch-rolex to use microphases to get rid of all the noise and vibration. 
+
+The microphase implementation is more complicated than straight PWM, so there is [a full description of 
+how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around. (A phase is 1/3 of a step and is the smallest amount of movement we can create on this motor with static digital signals)
+
+There is still a very slight hum from the microphases, but it is so low that you really have to hold the motor to your ear to hear it. But we can get rid of that (or at least push it up above the frequency range where 57 year old man can Even hear it) if we really need to- just more work.
