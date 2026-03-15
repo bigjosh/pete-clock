@@ -1,6 +1,8 @@
 # pete-clock
 Making a Humans Since clock the simple way with no parts. Design calls for one AVR, one VID28-05, and one 1uF capacitor per clock face. That's it, no other parts. All motor control and inter-face communications via direct pin connections.
 
+Note that for some of these demos you will need the `digitalWriteFast` library. To install that in the Arduino IDE, got to Tools->Manage Libraries and find and install it. 
+
 ## simple-test
 
 This is the very simplest first proof of concept step just to prove that the motor can be driven fast and smooth enough with direct pin connections from an Arduino.
@@ -37,3 +39,7 @@ The microphase implementation is more complicated than straight PWM, so there is
 how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around. (A phase is 1/3 of a step and is the smallest amount of movement we can create on this motor with static digital signals)
 
 There is still a very slight hum from the microphases, but it is so low that you really have to hold the motor to your ear to hear it. But we can get rid of that (or at least push it up above the frequency range where 57 year old man can Even hear it) if we really need to- just more work.
+
+## step-wars
+
+For Ian. Instead of trying to be quiet, we embrace the loud. This is as loud as I could make it, but sadly, it is still not loud.
