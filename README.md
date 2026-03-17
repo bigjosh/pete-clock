@@ -17,20 +17,25 @@ Note that the output voltage on this configuration drops to ~4.2V so we have som
 
 A slight elaboration on the simple-test that so satisfyingly simulates a ticket watch.
 
-The outer hand ticks (it really ticks too!) each second and the inner hand ticks once per minute. 
+The outer hand ticks (it really ticks too!) each second and the inner hand ticks once per minute.
 
-If you want the minute tick to come exactly as the seconds hand passed 12 o'clock, then wait for the next time the seconds is at the top and push the Arduino reset button exactly then. 
+If you want the minute tick to come exactly as the seconds hand passes 12 o'clock, then wait for the next time the seconds is at the top and push the Arduino reset button exactly then. 
 
-## test-microphase
+## test-microphase-portable
 
 To do anything smoother and quieter at slow speeds, we are going to need to use microphases - which is
-a way to move the rotor to a position between two phases (this motor has 6 phases per step and 360 steps per rotation). 
+a way to move the rotor to a position between two phases (this motor has 6 phases per step and 360 steps per rotation).
 
 So this sketch presents our solution to the problem - a general purpose driver that can move the 
 rotor to any one of 256 subphase positions inside each phase. 
 
 The microphase implementation is more complicated than straight PWM, so there is [a full description of 
-how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around.
+how microphases work](microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around.
+
+This version is "portable" because it only uses the libs TimerOne and DigitWriteFast to access the hardware. There 
+is another (non-published) version that uses direct registers and hand written ASM to make the time spent in the 
+tick function *much* shorter - which allows much higher carrier frequencies. But lets see how far we can get with the
+portable version first.
 
 ## watch-rolex
 
@@ -57,7 +62,6 @@ oscillator on this chip is only accurate to +/-5% so don't be too mad if you are
 3. I am noticing some slop in the gears, particularly when the hand is going down so gravity is with us. If needed,
 maybe we can do some fancy anti-backlash and always turn the rotor a little tiny bit in the opposite direction
 after every stop to take up some of the slack?
-
 
 ## step-wars
 
