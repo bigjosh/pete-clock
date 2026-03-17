@@ -1,7 +1,7 @@
 # pete-clock
 Making a Humans Since clock the simple way with no parts. Design calls for one AVR, one VID28-05, and one 1uF capacitor per clock face. That's it, no other parts. All motor control and inter-face communications via direct pin connections.
 
-Note that for some of these demos you will need the `digitalWriteFast` library. To install that in the Arduino IDE, got to Tools->Manage Libraries and find and install it. 
+Note that for some of these demos you will need the `digitalWriteFast` and the `TimerOne` libraries. To install in the Arduino IDE, got to Tools->Manage Libraries and find and install them. 
 
 ## simple-test
 
@@ -30,7 +30,7 @@ So this sketch presents our solution to the problem - a general purpose driver t
 rotor to any one of 256 subphase positions inside each phase. 
 
 The microphase implementation is more complicated than straight PWM, so there is [a full description of 
-how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around. (A phase is 1/3 of a step and is the smallest amount of movement we can create on this motor with static digital signals)
+how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around.
 
 ## watch-rolex
 
@@ -39,6 +39,25 @@ The second hand advances exactly 8 times per second, and the minute hand
 advances on every same beat by 1/60th as much on average - just like a real
 Rolex. It uses our new microphase framework to be able to hit all of those
 positions, many of which do not land exactly on even phase locations.
+
+## watch-aramtron
+
+The Armatron is the smoothest watch I have ever seen, and this sketch aims to emulate that by being
+as smooth as we can possibly be using our subphases driver. To eliminate all jitter and acceleration,
+we update the subphase position with every time we update the pin states, running off of the fixed
+period timer. We set the timer so that one every timer fire, we move exactly one microphase. 
+
+Notes:
+1. The timer on this chip, the closest available frequency to 1 microphase/cycle is off by a tiny bit so
+this watch runs at 1.000064 RPM (3.84 ms fast per revolution). Sorry. Do also note that the internal 
+oscillator on this chip is only accurate to +/-5% so don't be too mad if you are late for dinner. 
+
+2. The actual Aramtron runs off of a 360Hz tuning fork. We win. 
+
+3. I am noticing some slop in the gears, particularly when the hand is going down so gravity is with us. If needed,
+maybe we can do some fancy anti-backlash and always turn the rotor a little tiny bit in the opposite direction
+after every stop to take up some of the slack?
+
 
 ## step-wars
 
