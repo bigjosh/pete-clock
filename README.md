@@ -21,24 +21,24 @@ The outer hand ticks (it really ticks too!) each second and the inner hand ticks
 
 If you want the minute tick to come exactly as the seconds hand passed 12 o'clock, then wait for the next time the seconds is at the top and push the Arduino reset button exactly then. 
 
-## watch-rolex
+## test-microphase
 
-A slight elaboration on the watch-tick where the second hand *smoothly* sweeps one rotation per minute (like a real rolex).
-The minute hand also sweeps smoothly, but less dramatically. 
+To do anything smoother and quieter at slow speeds, we are going to need to use microphases - which is
+a way to move the rotor to a position between two phases (this motor has 6 phases per step and 360 steps per rotation). 
 
-This version is naïve and uses only full phases (1/3 of a step). With my hands, it is very smooth when the hand is 
-going up on the left side of the face, but jerky when it goes down the right side. I think this is because with each 
-phase the hand is accelerated and decelerated and so when going down it picks up speed and then "bounces" when it stops at the 
-end of the phase. I think we can cure this jerk by using microsteps to achieve constant velocity (hopefully zero acceleration and jerk).
-
-## watch-rolex-microphase
-
-A complete rewrite of watch-rolex to use microphases to get rid of all the noise and vibration. 
+So this sketch presents our solution to the problem - a general purpose driver that can move the 
+rotor to any one of 256 subphase positions inside each phase. 
 
 The microphase implementation is more complicated than straight PWM, so there is [a full description of 
 how microphases work](watch-rolex-microphases.md) if you care, but the take away is that it lets us step at very low speeds like 1RPM very smoothly and quietly by `blending` between two adjacent phases as we go around. (A phase is 1/3 of a step and is the smallest amount of movement we can create on this motor with static digital signals)
 
-There is still a very slight hum from the microphases, but it is so low that you really have to hold the motor to your ear to hear it. But we can get rid of that (or at least push it up above the frequency range where 57 year old man can Even hear it) if we really need to- just more work.
+## watch-rolex
+
+A Rolex-style watch face driven through the new subphase driver.
+The second hand advances exactly 8 times per second, and the minute hand
+advances on every same beat by 1/60th as much on average - just like a real
+Rolex. It uses our new microphase framework to be able to hit all of those
+positions, many of which do not land exactly on even phase locations.
 
 ## step-wars
 

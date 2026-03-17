@@ -154,8 +154,6 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
   static inline void publishBlendValue(
       microphase_motor_runtime_t<MotorSpec> &runtime,
       uint8_t blendValue) {
-        
-    // Not strictly needed on AVR 8bit (regs are atomic) but this is not in the ISR hot path so...
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
       runtime.blendValue = blendValue;
     }
@@ -163,11 +161,9 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
 
   template <typename MotorSpec>
   static inline void tickMotor(microphase_motor_runtime_t<MotorSpec> &runtime) {
-    
-    // TODO: we could use `__builtin_add_overflow` here to save a few cycles, but
-    // probably better to move to a full ASM bare ISR if we need it. 
     const uint8_t oldAccumulator = runtime.accumulator;
-    const uint8_t nextAccumulator = (uint8_t)(oldAccumulator + runtime.blendValue);
+    const uint8_t nextAccumulator =
+        (uint8_t)(oldAccumulator + runtime.blendValue);
     const uint8_t desiredPhaseB = (nextAccumulator < oldAccumulator) ? 1 : 0;
 
     runtime.accumulator = nextAccumulator;

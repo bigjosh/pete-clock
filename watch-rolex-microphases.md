@@ -1,6 +1,6 @@
-# Some notes on how `watch-rolex-microphase` works
+# Some notes on how `watch-rolex` works
 
-This note explains the idea behind `watch-rolex-microphase.ino` for a reader who already understands PWM, but may not have seen this exact delta-sigma style trick before. it is more complicated, but it is
+This note explains the idea behind `watch-rolex.ino` for a reader who already understands PWM, but may not have seen this exact delta-sigma style trick before. it is more complicated, but it is
 worth it for this application where Pete cares so dearly about quietness at all speeds. 
 
 The short version is:
@@ -127,7 +127,7 @@ The important part is not just the ratio. It is that the `N` outputs get spread 
 - delta-sigma style: `BBBBBBNBBBBBBN...`
 - fixed-frame PWM style: all the `N` pulses would bunch together into one block inside a repeating frame
 
-Both can reach the same long-term average, but the delta-sigma version spreads the energy out and avoids the hard low-frequency frame boundary.
+<b>Both can reach the same long-term average, but the delta-sigma version spreads the energy out and avoids the hard low-frequency frame boundary.</b>
 
 ## The two time scales in the code
 

@@ -1,116 +1,297 @@
-// A demo of a watch face with a second hand that *smoothly* sweeps one rotation per minute (like a real rolex).
-// The minute hand also sweeps smoothly, but less dramitically. 
-// This version is nieve and uses only full phases (1/3 of a step). With my hands, it is very smooth when the hand is 
-// going up on the left side of the face, but jerky when it goes down the right side. I think this is becuase with each 
-// phase the hand is accelerated and decelerated and so when going down it picks up speed and then "bounces" when it stops at the 
-// end of the phase. I think we can cure this jerk by using microsteps to achieve constant velocity (hopefuly zero accelerateion and jerk).
-// That will be the next test!
+// A Rolex-style watch face driven through the shared portable subphase driver.
+// The second hand advances exactly 8 times per second, and the minute hand
+// advances on every same beat by 1/60th as much on average - just like a real
+// Rolex. It uses our new microphase framework to be able to hit all of those
+// positions, many of which do not land exactly on even phases locations.
 
-// 360 steps per rev * 3 phases per step = (360*3) phases per rev
-// (360*3) phases per rev / 60 seconds per rev = 18 phases per second
-// 1s * (1000ms per second )/ (18 phases phases per second) = ~55.5555555556ms per phase
-// moveovere, we can not generate an exact clock that evenly goes into 18Hz from the 16Mhz clock on the Arduino so 
-// we have two choices - add leap phases with a breshinghams style "bouince around the exact value", or...
-// be lazy and just round up to 56ms per tick. I am lazy, and the arduino clock can be off by 5% anyway so who cares.
+#include <Arduino.h>
+#include <TimerOne.h>
 
-// Include the digitalWriteFast library
-#include <digitalWriteFast.h>
+#include "microphase_motor_driver.h"
 
-#define MILLIS_PER_SEC_PHASE 56
-#define SEC_PER_MIN 60
-#define MILLIS_PER_MIN_PHASE (MILLIS_PER_SEC_PHASE*SEC_PER_MIN)
+// Uncomment to drive a scope probe high for the duration of the carrier ISR.
+#define CALLBACK_BENCHMARK_PIN 12
 
-// It takes 6 phase per step
-#define PHASE_COUNT 6
+const uint8_t PHASE_COUNT = 6;
+const uint8_t CONTACT_COUNT = 4;
+const uint32_t SUBPHASES_PER_PHASE = 256UL;
 
-// There are 4 pins per axle. The datsheet calls them CONATC1 - CONATCT4. 
-#define CONTACT_COUNT 4
+const uint32_t COARSE_PHASES_PER_ROTATION = 360UL * 3UL;
+const uint32_t SUBPHASES_PER_ROTATION =
+    COARSE_PHASES_PER_ROTATION * SUBPHASES_PER_PHASE;
 
+const uint32_t SECOND_HAND_TICKS_PER_SECOND = 8UL;
+const uint32_t SECOND_HAND_TICKS_PER_ROTATION =
+    60UL * SECOND_HAND_TICKS_PER_SECOND;
+const uint32_t MINUTE_HAND_TICKS_PER_ROTATION =
+    60UL * SECOND_HAND_TICKS_PER_ROTATION;
+const uint32_t TICK_PERIOD_US = 1000000UL / SECOND_HAND_TICKS_PER_SECOND;
+const uint32_t CARRIER_PERIOD_US = 32UL;
+const uint32_t MAX_PUBLISH_DELTA_SUBPHASES = SUBPHASES_PER_PHASE - 1UL;
 
-// We execute these steps on the output pins in order to turn
-// again taken directly from the datasheet, even using thier names
-// Note that Contacts 2 and 3 are always the same. The datasheets combines them into a single trace.
-const int phases[PHASE_COUNT][CONTACT_COUNT] = {
-  {1,0,0,1},    //1
-  {0,0,0,1},    //2
-  {0,1,1,1},    //3
-  {0,1,1,0},    //4
-  {1,1,1,0},    //5
-  {1,0,0,0},    //6
+const uint32_t OUTER_SUBPHASES_PER_TICK =
+    SUBPHASES_PER_ROTATION / SECOND_HAND_TICKS_PER_ROTATION;
+const float OUTER_AVG_SUBPHASES_PER_TICK = (float)OUTER_SUBPHASES_PER_TICK;
+const float INNER_AVG_SUBPHASES_PER_TICK =
+    (float)SUBPHASES_PER_ROTATION / (float)MINUTE_HAND_TICKS_PER_ROTATION;
+const float TICK_PERIOD_SECONDS = TICK_PERIOD_US / 1000000.0f;
+
+// These are the motion limits for the foreground chaser, not the TimerOne
+// carrier. We respond to each 8 Hz tick by accelerating toward the next
+// commanded position, then clamping hard to rest when we arrive.
+const float OUTER_MAX_ACCELERATION_SUBPHASES_PER_S2 =
+    (4.0f * OUTER_AVG_SUBPHASES_PER_TICK) /
+    (TICK_PERIOD_SECONDS * TICK_PERIOD_SECONDS);
+const float INNER_MAX_ACCELERATION_SUBPHASES_PER_S2 =
+    (4.0f * INNER_AVG_SUBPHASES_PER_TICK) /
+    (TICK_PERIOD_SECONDS * TICK_PERIOD_SECONDS);
+// One whole phase per carrier cycle would be an absolute upper bound if we
+// want to guarantee we never jump across multiple phases in one publish.
+const float HARD_MAX_VELOCITY_SUBPHASES_PER_S =
+    (SUBPHASES_PER_PHASE * 1000000.0f) / CARRIER_PERIOD_US;
+
+static_assert((1000000UL % SECOND_HAND_TICKS_PER_SECOND) == 0UL,
+              "tick rate must divide one second exactly");
+static_assert((SUBPHASES_PER_ROTATION % SECOND_HAND_TICKS_PER_ROTATION) == 0UL,
+              "outer hand tick size must be integral");
+
+#define INNER_PIN_1 5
+#define INNER_PIN_2 4
+#define INNER_PIN_3 7
+#define INNER_PIN_4 6
+
+#define OUTER_PIN_1 9
+#define OUTER_PIN_2 8
+#define OUTER_PIN_3 3
+#define OUTER_PIN_4 2
+
+const int8_t INNER_DIRECTION = 1;
+const int8_t OUTER_DIRECTION = -1;
+
+struct inner_motor_spec : microphase_motor_spec_t<CONTACT_COUNT, PHASE_COUNT> {
+  static const uint8_t pins[pin_count];
+  static const uint8_t phases[phase_count][pin_count];
 };
 
-
-// Pins from VID28 datasheet . Also called contacts.
-// First is the pin name in the datasheet, next is the color of our wire, last is the Arduino IO pin it is connected to
-// Inner motor - 
-//  A1 = BLUE = 5
-//  A2 = PURPLE = 4
-//  A3 = YELLOW = 7
-//  A4 = GREEN = 6
-
-// B1 - RED - 9
-// B2 - ORANGE - 8
-// B3 - GREY - 3
-// B4 - WHITE 2
-
-#define INNER_AXLE   0
-#define OUTER_AXLE  1
-
-const int motorPins[2][CONTACT_COUNT] = {
-  {5, 4, 7, 6},   // Inner axle  
-  {9, 8, 3, 2},   // Outer axle
+const uint8_t inner_motor_spec::pins[inner_motor_spec::pin_count] = {
+  INNER_PIN_1,
+  INNER_PIN_2,
+  INNER_PIN_3,
+  INNER_PIN_4,
 };
 
-unsigned long next_sec_phase;
-unsigned long next_min_phase;
+const uint8_t inner_motor_spec::phases[inner_motor_spec::phase_count]
+                                      [inner_motor_spec::pin_count] = {
+  {1, 0, 0, 1},
+  {0, 0, 0, 1},
+  {0, 1, 1, 1},
+  {0, 1, 1, 0},
+  {1, 1, 1, 0},
+  {1, 0, 0, 0},
+};
 
-void setup() {
-  // Set all motor pins as outputs
-  // Some day We might want to float pins sometimes to avoice cogging?
-  for (int i = 0; i < CONTACT_COUNT; i++) {
-    pinMode(motorPins[INNER_AXLE][i], OUTPUT);
-    pinMode(motorPins[OUTER_AXLE][i], OUTPUT);
+struct outer_motor_spec : microphase_motor_spec_t<CONTACT_COUNT, PHASE_COUNT> {
+  static const uint8_t pins[pin_count];
+  static const uint8_t phases[phase_count][pin_count];
+};
+
+const uint8_t outer_motor_spec::pins[outer_motor_spec::pin_count] = {
+  OUTER_PIN_1,
+  OUTER_PIN_2,
+  OUTER_PIN_3,
+  OUTER_PIN_4,
+};
+
+const uint8_t outer_motor_spec::phases[outer_motor_spec::phase_count]
+                                      [outer_motor_spec::pin_count] = {
+  {1, 0, 0, 1},
+  {0, 0, 0, 1},
+  {0, 1, 1, 1},
+  {0, 1, 1, 0},
+  {1, 1, 1, 0},
+  {1, 0, 0, 0},
+};
+
+microphase_motor_driver<inner_motor_spec, outer_motor_spec> driver;
+
+struct AxleState {
+  uint32_t commandedSubphasePosition;
+  uint32_t publishedSubphasePosition;
+  float actualSubphasePosition;
+  float velocitySubphasesPerSecond;
+  float maxAccelerationSubphasesPerSecond2;
+  int8_t direction;
+};
+
+AxleState innerAxle = {
+  0UL,
+  0UL,
+  0.0f,
+  0.0f,
+  INNER_MAX_ACCELERATION_SUBPHASES_PER_S2,
+  INNER_DIRECTION
+};
+
+AxleState outerAxle = {
+  0UL,
+  0UL,
+  0.0f,
+  0.0f,
+  OUTER_MAX_ACCELERATION_SUBPHASES_PER_S2,
+  OUTER_DIRECTION
+};
+
+uint32_t nextBeatUs = 0UL;
+uint32_t lastMotionUs = 0UL;
+uint32_t minuteHandAccumulator = 0UL;
+
+inline uint8_t wrapPhaseIndex(int16_t value) {
+  value %= PHASE_COUNT;
+  if (value < 0) {
+    value += PHASE_COUNT;
   }
-    
+  return (uint8_t)value;
 }
 
-byte inner_phase = 0;     
-byte outer_phase = 0;
+inline uint8_t phaseFromCount(uint32_t phaseCount, int8_t direction) {
+  return wrapPhaseIndex((int16_t)(direction * (int32_t)(phaseCount % PHASE_COUNT)));
+}
 
-void loop() {
-  
-  // We need to snapshot this so we don't lose ticks 
-  unsigned long now = millis();
-  
-  if ( now >= next_sec_phase ) {
-    
-    // Outter axle seconds ( Clockwise is backwards becuase of gearing )
-    if (outer_phase == 0 ) {
-      outer_phase = PHASE_COUNT;
-    }    
-    outer_phase--;
-    
-    for (int i = 0; i < CONTACT_COUNT; i++) {    
-      digitalWriteFast(motorPins[OUTER_AXLE][i], phases[outer_phase][i]);
+uint32_t wrapSubphasePosition(uint32_t subphasePosition) {
+  return subphasePosition % SUBPHASES_PER_ROTATION;
+}
+
+template <uint8_t MotorIndex>
+void publishSubphasePosition(int8_t direction, uint32_t subphasePosition) {
+  const uint32_t wrappedSubphasePosition = wrapSubphasePosition(subphasePosition);
+  const uint32_t phaseCount = wrappedSubphasePosition / SUBPHASES_PER_PHASE;
+  const uint8_t phaseA = phaseFromCount(phaseCount, direction);
+  const uint8_t phaseB = wrapPhaseIndex((int16_t)phaseA + direction);
+  const uint8_t blendValue =
+      (uint8_t)(wrappedSubphasePosition % SUBPHASES_PER_PHASE);
+
+  driver.template publish<MotorIndex>(phaseA, phaseB, blendValue);
+}
+
+void advanceRolexBeat() {
+  outerAxle.commandedSubphasePosition += OUTER_SUBPHASES_PER_TICK;
+
+  minuteHandAccumulator += SUBPHASES_PER_ROTATION;
+  const uint32_t innerAdvance =
+      minuteHandAccumulator / MINUTE_HAND_TICKS_PER_ROTATION;
+  minuteHandAccumulator %= MINUTE_HAND_TICKS_PER_ROTATION;
+
+  innerAxle.commandedSubphasePosition += innerAdvance;
+}
+
+void normalizeAxle(AxleState &axle) {
+  while (axle.commandedSubphasePosition >= SUBPHASES_PER_ROTATION &&
+         axle.publishedSubphasePosition >= SUBPHASES_PER_ROTATION) {
+    axle.commandedSubphasePosition -= SUBPHASES_PER_ROTATION;
+    axle.publishedSubphasePosition -= SUBPHASES_PER_ROTATION;
+    axle.actualSubphasePosition -= (float)SUBPHASES_PER_ROTATION;
+    if (axle.actualSubphasePosition < 0.0f) {
+      axle.actualSubphasePosition = 0.0f;
     }
-    
-    next_sec_phase += MILLIS_PER_SEC_PHASE;
-    
+  }
+}
+
+template <uint8_t MotorIndex>
+void serviceAxleMotion(AxleState &axle, float dtSeconds) {
+  const float commandedPosition = (float)axle.commandedSubphasePosition;
+  float remainingSubphases = commandedPosition - axle.actualSubphasePosition;
+
+  if (remainingSubphases <= 0.0f) {
+    axle.actualSubphasePosition = commandedPosition;
+    axle.velocitySubphasesPerSecond = 0.0f;
+  } else {
+    axle.velocitySubphasesPerSecond +=
+        axle.maxAccelerationSubphasesPerSecond2 * dtSeconds;
+    if (axle.velocitySubphasesPerSecond > HARD_MAX_VELOCITY_SUBPHASES_PER_S) {
+      axle.velocitySubphasesPerSecond = HARD_MAX_VELOCITY_SUBPHASES_PER_S;
+    }
+
+    axle.actualSubphasePosition += axle.velocitySubphasesPerSecond * dtSeconds;
+    if (axle.actualSubphasePosition >= commandedPosition) {
+      axle.actualSubphasePosition = commandedPosition;
+      axle.velocitySubphasesPerSecond = 0.0f;
+    }
   }
 
-  if ( now >= next_min_phase ) {
-  
-      // minute hand on inner axle (Clockwise)
-      inner_phase++;
-      if (inner_phase >= PHASE_COUNT ) {
-        inner_phase = 0;
-      }
+  const uint32_t desiredPublishedSubphasePosition =
+      (uint32_t)(axle.actualSubphasePosition + 0.5f);
 
-    for (int i = 0; i < CONTACT_COUNT; i++) {    
-      digitalWriteFast(motorPins[INNER_AXLE][i], phases[inner_phase][i]);
+  while (desiredPublishedSubphasePosition > axle.publishedSubphasePosition) {
+    uint32_t deltaSubphases =
+        desiredPublishedSubphasePosition - axle.publishedSubphasePosition;
+    if (deltaSubphases > MAX_PUBLISH_DELTA_SUBPHASES) {
+      deltaSubphases = MAX_PUBLISH_DELTA_SUBPHASES;
     }
-    
-    next_min_phase += MILLIS_PER_MIN_PHASE;
-    
-  }   
+
+    axle.publishedSubphasePosition += deltaSubphases;
+    publishSubphasePosition<MotorIndex>(axle.direction,
+                                        axle.publishedSubphasePosition);
+  }
+}
+
+void serviceRolexBeat(uint32_t nowUs) {
+  if ((int32_t)(nowUs - nextBeatUs) >= 0) {
+    nextBeatUs = nowUs + TICK_PERIOD_US;
+    advanceRolexBeat();
+  }
+}
+
+void serviceMotion(uint32_t nowUs) {
+  const uint32_t elapsedUs = (uint32_t)(nowUs - lastMotionUs);
+  if (elapsedUs == 0UL) {
+    return;
+  }
+
+  lastMotionUs = nowUs;
+  const float dtSeconds = elapsedUs / 1000000.0f;
+
+  serviceAxleMotion<0>(innerAxle, dtSeconds);
+  serviceAxleMotion<1>(outerAxle, dtSeconds);
+
+  normalizeAxle(innerAxle);
+  normalizeAxle(outerAxle);
+}
+
+void onCarrierTick() {
+#ifdef CALLBACK_BENCHMARK_PIN
+  digitalWriteFast(CALLBACK_BENCHMARK_PIN, HIGH);
+#endif
+
+  driver.tick();
+
+#ifdef CALLBACK_BENCHMARK_PIN
+  digitalWriteFast(CALLBACK_BENCHMARK_PIN, LOW);
+#endif
+}
+
+void setup() {
+  driver.begin();
+
+#ifdef CALLBACK_BENCHMARK_PIN
+  pinModeFast(CALLBACK_BENCHMARK_PIN, OUTPUT);
+  digitalWriteFast(CALLBACK_BENCHMARK_PIN, LOW);
+#endif
+
+  publishSubphasePosition<0>(innerAxle.direction,
+                             innerAxle.publishedSubphasePosition);
+  publishSubphasePosition<1>(outerAxle.direction,
+                             outerAxle.publishedSubphasePosition);
+
+  const uint32_t nowUs = micros();
+  nextBeatUs = nowUs + TICK_PERIOD_US;
+  lastMotionUs = nowUs;
+
+  Timer1.initialize(CARRIER_PERIOD_US);
+  Timer1.attachInterrupt(onCarrierTick);
+}
+
+void loop() {
+  const uint32_t nowUs = micros();
+  serviceRolexBeat(nowUs);
+  serviceMotion(nowUs);
 }
