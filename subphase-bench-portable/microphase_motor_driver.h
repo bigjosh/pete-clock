@@ -23,10 +23,11 @@ struct microphase_motor_spec_t {
 
 template <typename MotorSpec>
 struct microphase_motor_runtime_t {
+  static_assert(MotorSpec::pin_count <= 8, "pin mask supports up to 8 pins");
   uint8_t blendValue;
   uint8_t accumulator;
   uint8_t isPhaseB;
-  uint8_t pinDiffers[MotorSpec::pin_count];
+  uint8_t pinDiffersMask;
 };
 
 template <typename... MotorSpecs>
@@ -104,36 +105,38 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
   template <typename MotorSpec, uint8_t PinIndex>
   static inline typename microphase_enable_if<
       (PinIndex == MotorSpec::pin_count), void>::type
-  prepareTransition(microphase_motor_runtime_t<MotorSpec> &, uint8_t, uint8_t) {}
+  prepareTransition(uint8_t &, uint8_t, uint8_t) {}
 
   template <typename MotorSpec, uint8_t PinIndex>
   static inline typename microphase_enable_if<
       (PinIndex < MotorSpec::pin_count), void>::type
-  prepareTransition(microphase_motor_runtime_t<MotorSpec> &runtime,
+  prepareTransition(uint8_t &pinDiffersMask,
                     uint8_t phaseA,
                     uint8_t phaseB) {
     const uint8_t phaseAValue = MotorSpec::phases[phaseA][PinIndex];
     const uint8_t phaseBValue = MotorSpec::phases[phaseB][PinIndex];
 
-    runtime.pinDiffers[PinIndex] = (phaseAValue != phaseBValue) ? 1 : 0;
+    if (phaseAValue != phaseBValue) {
+      pinDiffersMask |= (uint8_t)(1U << PinIndex);
+    }
 
-    prepareTransition<MotorSpec, PinIndex + 1>(runtime, phaseA, phaseB);
+    prepareTransition<MotorSpec, PinIndex + 1>(pinDiffersMask, phaseA, phaseB);
   }
 
   template <typename MotorSpec, uint8_t PinIndex>
-  static inline typename microphase_enable_if<
-      (PinIndex == MotorSpec::pin_count), void>::type
-  toggleChangedPins(const microphase_motor_runtime_t<MotorSpec> &) {}
+  static inline typename microphase_enable_if<(PinIndex == MotorSpec::pin_count),
+                                              void>::type
+  toggleChangedPins(uint8_t) {}
 
   template <typename MotorSpec, uint8_t PinIndex>
   static inline typename microphase_enable_if<
       (PinIndex < MotorSpec::pin_count), void>::type
-  toggleChangedPins(const microphase_motor_runtime_t<MotorSpec> &runtime) {
-    if (runtime.pinDiffers[PinIndex] != 0) {
+  toggleChangedPins(uint8_t pinDiffersMask) {
+    if ((pinDiffersMask & (uint8_t)(1U << PinIndex)) != 0) {
       digitalToggleFast(MotorSpec::pins[PinIndex]);
     }
 
-    toggleChangedPins<MotorSpec, PinIndex + 1>(runtime);
+    toggleChangedPins<MotorSpec, PinIndex + 1>(pinDiffersMask);
   }
 
   template <typename MotorSpec>
@@ -142,8 +145,10 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
                                   uint8_t phaseB,
                                   uint8_t blendValue) {
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+      uint8_t pinDiffersMask = 0;
       writePhaseByIndex<MotorSpec, 0>(phaseA);
-      prepareTransition<MotorSpec, 0>(runtime, phaseA, phaseB);
+      prepareTransition<MotorSpec, 0>(pinDiffersMask, phaseA, phaseB);
+      runtime.pinDiffersMask = pinDiffersMask;
       runtime.blendValue = blendValue;
       runtime.accumulator = 0;
       runtime.isPhaseB = 0;
@@ -163,12 +168,11 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
 
   template <typename MotorSpec>
   static inline void tickMotor(microphase_motor_runtime_t<MotorSpec> &runtime) {
-    
-    // TODO: we could use `__builtin_add_overflow` here to save a few cycles, but
-    // probably better to move to a full ASM bare ISR if we need it. 
     const uint8_t oldAccumulator = runtime.accumulator;
-    const uint8_t nextAccumulator = (uint8_t)(oldAccumulator + runtime.blendValue);
-    const uint8_t desiredPhaseB = (nextAccumulator < oldAccumulator) ? 1 : 0;
+    const uint8_t nextAccumulator =
+        (uint8_t)(oldAccumulator + runtime.blendValue);
+    const uint8_t desiredPhaseB =
+        (nextAccumulator < oldAccumulator) ? 1U : 0U;
 
     runtime.accumulator = nextAccumulator;
     if (desiredPhaseB == runtime.isPhaseB) {
@@ -176,11 +180,11 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
     }
 
     runtime.isPhaseB = desiredPhaseB;
-    toggleChangedPins<MotorSpec, 0>(runtime);
+    toggleChangedPins<MotorSpec, 0>(runtime.pinDiffersMask);
   }
 
  public:
-  microphase_motor_driver() : runtime_(), base_t() {}
+  microphase_motor_driver() : base_t(), runtime_() {}
 
   inline void begin() {
     beginPins<FirstMotorSpec, 0>();
@@ -188,8 +192,12 @@ class microphase_motor_driver<FirstMotorSpec, RemainingMotorSpecs...>
   }
 
   inline void tick() {
+    //digitalWriteFast(11, 1);
+
     tickMotor<FirstMotorSpec>(runtime_);
     base_t::tick();
+    //digitalWriteFast(11, 0);
+
   }
 
   template <uint8_t MotorIndex>
